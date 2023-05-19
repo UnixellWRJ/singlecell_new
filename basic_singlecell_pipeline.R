@@ -11,8 +11,7 @@ library(patchwork)
 colorset_18<-c("grey80","grey80","grey80","grey80","grey80","#FF00CC","#FF0033","#66CCFF","#66FF00","#66CCCC","grey80","grey80",
                        "grey80","grey80","grey80","grey80","grey80","grey80")
 
-#tmp change 
-#tmptmp
+
 #1. dimplot making, include merged and split
 dimplot_making<-function(sdata,fname="stem.data",cluster="RNA_snn_res.0.8",colorset="Pastel1",colornum=50,height_m=5,width_m=6,height_s=8,
                          Legend="No"){
