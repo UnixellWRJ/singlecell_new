@@ -11,6 +11,31 @@ library(patchwork)
 colorset_18<-c("grey80","grey80","grey80","grey80","grey80","#FF00CC","#FF0033","#66CCFF","#66FF00","#66CCCC","grey80","grey80",
                        "grey80","grey80","grey80","grey80","grey80","grey80")
 
+#celltype annotation features
+##vivo
+features_fib<-c("COL1A1","COL1A2","VIM","FN1")
+features_DA<-"TH"
+features_DA_A9<-c("ALDH1A1","KCNJ6","NR4A2")
+features_DA_A10<-"CALB1"
+features_Glut<-c("SLC17A6","PITX2")
+#SLC32A1 is a specific marker
+features_gaba<-c("SLC32A1","GAD1","GAD2")
+features_Sero<-c('SLC6A4','SLC17A8','FEV','TPH2','GATA3')
+features_OTP<-"OTP"
+#AQP4 is the specific marker
+features_Astrocyte<-c('AQP4','SLC1A3','GFAP','GJA1')
+features_astro_A1<-"S100A10"
+features_astro_A2<-"C3"
+features_od<-c('PLP1','MOG','MBP')
+features_opc<-c('PDGFRA','SOX10','CSPG4','OLIG2','OLIG1')
+features_peric<-"PDGFRB"
+features_Nb<-c('NEUROD1','NEUROD2','ASCL1','INSM1')
+features_neuron<-"STMN2"
+features_prog<-"SOX2"
+##vitro
+features_position<-c("OTX2","EN1","PLP1","LMX1A","FOXA2")
+features_all<-c(features_fib,features_DA,features_DA_A9,features_DA_A10,features_Glut,features_gaba,features_Sero,features_OTP,features_Astrocyte,features_astro_A1,features_astro_A2,features_od,features_opc,features_peric,features_Nb,features_neuron,features_prog,features_position)
+
 
 #1. dimplot making, include merged and split
 dimplot_making<-function(sdata,fname="stem.data",cluster="RNA_snn_res.0.8",colorset="Pastel1",colornum=50,height_m=5,width_m=6,height_s=8,
@@ -118,10 +143,16 @@ percent_graph_make<-function(sdata,fname="stem.data",clustername="RNA_snn_res.0.
 }
 
 #3. heatmap making
-make_dot_heatmap<-function(sdata,marker_file,fname="stem.data",ntop=5,mcenter=T,mscale=T,
+#analysis type: marker_file;featurelist
+make_dot_heatmap<-function(sdata,analysis_type="marker_file",marker_file="NA",featurelist="NA",fname="stem.data",ntop=5,mcenter=T,mscale=T,
                            color_l="grey20",color_m="white",color_h="red"){
-  marker_file %>% group_by(cluster) %>% top_n(n=ntop,wt=avg_log2FC) -> topn_markers
-  genelist<-unique(topn_markers$gene)
+  if(analysis_type=="marker_file"){
+    marker_file %>% group_by(cluster) %>% top_n(n=ntop,wt=avg_log2FC) -> topn_markers
+    genelist<-unique(topn_markers$gene)
+  }
+  else if(analysis_type=="featurelist"){
+    genelist<-featurelist
+  }
   avg_list<-AverageExpression(sdata,assays="RNA",features=genelist)
   avg<-avg_list[["RNA"]]
   avg_scale<-data.frame(t(scale(t(avg),center=mcenter,scale=mscale)))
