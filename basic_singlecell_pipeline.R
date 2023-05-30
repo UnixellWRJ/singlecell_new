@@ -13,7 +13,12 @@ colorset_18<-c("grey80","grey80","grey80","grey80","grey80","#FF00CC","#FF0033",
 
 #celltype annotation features
 ##vivo
-features_fib<-c("COL1A1","COL1A2","VIM","FN1")
+features_fib<-c("COL1A1","COL1A2","VIM","FN1","PDGFRB","PDGFRA","LAMA1","ANPEP")
+features_peri<-c("PDGFRB", "CSPG4", "DES", "KCNJ8", "ABCC9", "ANPEP")
+features_vlmc<-c("PDGFRB", "ACTA2", "ANPEP", "CSPG4", "MCAM", "DES")
+features_dural_fib<-c("FXYD5", "FOXP1", "SIX1")
+features_ara_fib<-c("CRABP2", "ALDH1A2", "SLC6A13")
+features_pial_fib<-c("S100A6","NGFR")
 features_DA<-"TH"
 features_DA_A9<-c("ALDH1A1","KCNJ6","NR4A2")
 features_DA_A10<-"CALB1"
@@ -34,7 +39,7 @@ features_neuron<-"STMN2"
 features_prog<-"SOX2"
 ##vitro
 features_position<-c("OTX2","EN1","PLP1","LMX1A","FOXA2")
-features_all<-c(features_fib,features_DA,features_DA_A9,features_DA_A10,features_Glut,features_gaba,features_Sero,features_OTP,features_Astrocyte,features_astro_A1,features_astro_A2,features_od,features_opc,features_peric,features_Nb,features_neuron,features_prog,features_position)
+features_all<-c(features_fib,features_peri,features_vlmc,features_dural_fib,features_ara_fib,features_pial_fib,features_DA,features_DA_A9,features_DA_A10,features_Glut,features_gaba,features_Sero,features_OTP,features_Astrocyte,features_astro_A1,features_astro_A2,features_od,features_opc,features_peric,features_Nb,features_neuron,features_prog,features_position)
 
 
 #1. dimplot making, include merged and split
@@ -143,20 +148,27 @@ percent_graph_make<-function(sdata,fname="stem.data",clustername="RNA_snn_res.0.
 }
 
 #3. heatmap making
-#analysis type: marker_file;featurelist
-make_dot_heatmap<-function(sdata,analysis_type="marker_file",marker_file="NA",featurelist="NA",fname="stem.data",ntop=5,mcenter=T,mscale=T,
+#3-1 heatmap making by marker_file
+make_dot_heatmap<-function(sdata,marker_file,fname="stem.data",ntop=5,mcenter=T,mscale=T,
                            color_l="grey20",color_m="white",color_h="red"){
-  if(analysis_type=="marker_file"){
+  if(ntop=="all"){
+    topn_markers<-marker_file
+  }
+  else{
     marker_file %>% group_by(cluster) %>% top_n(n=ntop,wt=avg_log2FC) -> topn_markers
-    genelist<-unique(topn_markers$gene)
   }
-  else if(analysis_type=="featurelist"){
-    genelist<-featurelist
-  }
+  genelist<-unique(topn_markers$gene)
   avg_list<-AverageExpression(sdata,assays="RNA",features=genelist)
   avg<-avg_list[["RNA"]]
   avg_scale<-data.frame(t(scale(t(avg),center=mcenter,scale=mscale)))
   avg_scale$Gene<-rownames(avg_scale)
+  #scale the data by all
+  #Colname<-colnames(avg)
+  #Rowname<-rownames(avg)
+  #avg_melt<-data.frame(melt(avg,value.name="Exp"))
+  #Exp_scaled<-scale(avg_melt$Exp,center=mcenter,scale=mscale)
+  #avg_melt$Exp_scaled<-Exp_scaled
+  #avg_scale<-dcast(avg_melt,Var1~Var2)
   plot_data<-melt(avg_scale,id.vars="Gene",value.name="Avg_exp",variable.name="Cluster")
   plot_data$Cluster<-gsub("X","",plot_data$Cluster)
   #make pct list
@@ -192,12 +204,55 @@ make_dot_heatmap<-function(sdata,analysis_type="marker_file",marker_file="NA",fe
   print(p1)
   dev.off()
 }
+#3-2 heatmap making of selected genes
+make_dot_heatmap_features<-function(sdata,features,fname="stem.data",mcenter=T,mscale=T,
+                                    color_l="grey20",color_m="white",color_h="red"){
+  avg_list<-AverageExpression(sdata,assays="RNA",features=features)
+  avg<-avg_list[["RNA"]]
+  avg_scale<-data.frame(t(scale(t(avg),center=mcenter,scale=mscale)))
+  avg_scale$Gene<-rownames(avg_scale)
+  #Colname<-colnames(avg)
+  #Rowname<-rownames(avg)
+  #avg_melt<-data.frame(melt(avg,value.name="Exp"))
+  #Exp_scaled<-scale(avg_melt$Exp,center=mcenter,scale=mscale)
+  #avg_melt$Exp_scaled<-Exp_scaled
+  #avg_scale<-dcast(avg_melt,Var1~Var2)
+  #colnames(avg_scale)[1]<-"Gene"
+  plot_data<-melt(avg_scale,id.vars="Gene",value.name="Avg_exp",variable.name="Cluster")
+  plot_data$Cluster<-gsub("X","",plot_data$Cluster)
+  #make pct data
+  #calculate fold change of selected genes
+  features_sub<-unique(plot_data$Gene)
+  cluster_list<-unique(plot_data$Cluster)
+  fcdata<-c()
+  for(cl in cluster_list){
+    fctmp<-FoldChange(sdata,features=features_sub,ident.1=cl)
+    fctmp$Cluster<-cl
+    fctmp$Gene<-features_sub
+    fcdata<-rbind(fcdata,fctmp)
+  }
+  plot_data$Pct_exp<-fcdata$pct.1
+  plot_data$Cluster<-factor(plot_data$Cluster,levels=unique(plot_data$Cluster))
+  plot_data$Gene<-factor(plot_data$Gene,levels=unique(plot_data$Gene))
+  pdfname=paste0("heatmap_of_celltype_features_",fname,".pdf")
+  height_h<-5+(length(unique(plot_data$Cluster))-18)/8
+  width_h<-5+ceiling(length(features_sub)/7.5)
+  p1<-ggplot(data = plot_data, mapping = aes_string(x = "Gene", y = "Cluster")) +
+    geom_tile(fill="white",color="grey50")+
+    geom_point(mapping = aes_string(size = "Pct_exp", color = "Avg_exp")) +
+    scale_size_area(max_size = 4.8)+
+    scale_color_gradient2(low=color_l,mid=color_m,high=color_h,midpoint = mean(plot_data$Avg_exp))+
+    theme_classic()+
+    theme(text=element_text(size=12),axis.text.x=element_text(angle=90,hjust=1,vjust=0.5))
+  pdf(pdfname,height=height_h,width=width_h)
+  print(p1)
+  dev.off()
+}
 
 #4. make featureplot with circle in specific genes
 library(ggplot2)
 library(ggraph)
 library(ggalt)
-library(patchwork)
 #features<-c("TH","CALB2","KCNJ6")
 make_circled_featureplot<-function(sdata,features,circ_cluster,cluster_name="RNA_snn_res.0.8",circ_scale=0.9){
   exp_matrix<-FetchData(sdata,vars=features)
@@ -523,5 +578,90 @@ is_transcription_factor<-function(marker_file){
   marker_sub<-subset(marker_file,gene %in% tf_genes)
   return(marker_sub)
 }
+
+#10. calculate the expression percentage of certain genes, default threshold is 0
+cal_exp_percentage<-function(stem.data,features,thres=0){
+  exp_data<-FetchData(stem.data,vars=features)
+  colnames<-c()
+  for(i in 1:length(exp_data)){
+    gname<-paste0("Gene",i)
+    colnames<-c(colnames,gname)
+  }
+  colnames(exp_data)<-colnames
+  samlist=unique(stem.data$Sample)
+  metadata<-stem.data@meta.data
+  metadata<-cbind(metadata,exp_data)
+  #make the combination list of different features
+  combn_list<-list()
+  numall<-length(features)
+  for(i in 1:numall){
+    com_each<-combn(numall,i)
+    for(j in 1:length(com_each[1,])){
+      com_li<-com_each[,j]
+      combn_list<-c(combn_list,list(com_li))
+    }
+  }
+  dataout<-c()
+  for(sl in samlist){
+    sub1<-subset(metadata,Sample==sl)
+    for(cl in combn_list){
+      subsub<-sub1
+      for(k in cl){
+        subsub$tmp<-subsub[[paste0("Gene",k)]]
+        sub_tmp<-subset(subsub,tmp>thres)
+        if(length(sub_tmp[,1])==0){
+          subsub<-sub_tmp
+          break
+        }
+        else{
+          subsub<-sub_tmp
+        }
+      }
+      num_each<-length(subsub[,1])
+      per_each<-num_each/length(sub1[,1])*100
+      fsub<-features[cl]
+      fname<-paste(fsub,collapse="&")
+      dtmp<-data.frame(sl,fname,per_each)
+      dataout<-rbind(dataout,dtmp)
+    }
+  }
+  colnames(dataout)<-c("Sample","Gene","Percentage(%)")
+  return(dataout)
+}
+
+#11. make blend featureplot by dimplot function
+make_blend_featureplot<-function(sdata,features){
+  exp_matrix<-FetchData(sdata,vars=features)
+  exp_type<-c()
+  exp_num<-c()
+  for(i in 1:length(exp_matrix[,1])){
+    if(exp_matrix[i,1]>0 & exp_matrix[i,2]>0){
+      exp_type<-c(exp_type,"Yes")
+      exp_num<-c(exp_num,(exp_matrix[i,1]+exp_matrix[i,2]))
+    }
+    else{
+      exp_type<-c(exp_type,"No")
+      exp_num<-c(exp_num,0)
+    }
+  }
+  sdata$exp_type<-exp_type
+  ptitle=paste0(features[1]," & ",features[2])
+  p1<-DimPlot(sdata,group.by="exp_type",cols=c("lightgrey","#FF0099"),split.by="Sample",pt.size=0.5)+labs(title=ptitle)
+  return(p1)
+}
+
+#12. Add cluster name to the dataset by Seurat function RenameIdents by loading cell type csv file
+#The file has two columns:Cluster,CellType
+add_cluster_name<-function(sdata,CelltypeFileName="Celltype.csv",clustername="Cluster_name",cluster_to_annotate="RNA_snn_res.0.8"){
+  ctdata<-read.csv(CelltypeFileName,header=T)
+  cluster<-ctdata$Cluster
+  celltype<-ctdata$CellType
+  Idents(sdata)<-sdata[[cluster_to_annotate]]
+  names(celltype)<-cluster
+  sdata<-RenameIdents(sdata,celltype)
+  sdata[[clustername]]<-Idents(sdata)
+  return(sdata)
+}
+
 
 
