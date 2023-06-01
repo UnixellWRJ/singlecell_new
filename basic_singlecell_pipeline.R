@@ -254,13 +254,18 @@ library(ggplot2)
 library(ggraph)
 library(ggalt)
 #features<-c("TH","CALB2","KCNJ6")
-make_circled_featureplot<-function(sdata,features,circ_cluster,cluster_name="RNA_snn_res.0.8",circ_scale=0.9){
+make_circled_featureplot<-function(sdata,features,circ_cluster,cluster_name="RNA_snn_res.0.8",circ_scale=0.9,nmads=5){
   exp_matrix<-FetchData(sdata,vars=features)
   Cluster<-sdata@meta.data[[cluster_name]]
   cell_embeddings<-sdata@reductions$umap@cell.embeddings
   circ_data<-data.frame(Cluster,cell_embeddings)
   circ_select_raw<-subset(circ_data,Cluster==circ_cluster)
-  circ_select<-subset(circ_select_raw,UMAP_1<(circ_scale*max(circ_select_raw$UMAP_1)) & UMAP_1>(circ_scale*min(circ_select_raw$UMAP_1)) & UMAP_2<(circ_scale*max(circ_select_raw$UMAP_2)) &
+  #remove outliers first
+  thres_umap1<-c(median(circ_select_raw$UMAP_1)-nmads*mad(circ_select_raw$UMAP_1),median(circ_select_raw$UMAP_1)+nmads*mad(circ_select_raw$UMAP_1))
+  thres_umap2<-c(median(circ_select_raw$UMAP_2)-nmads*mad(circ_select_raw$UMAP_2),median(circ_select_raw$UMAP_2)+nmads*mad(circ_select_raw$UMAP_2))
+  circ_select1<-subset(circ_select_raw,UMAP_1>thres_umap1[1] & UMAP_1<thres_umap1[2] & 
+                         UMAP_2>thres_umap2[1] & UMAP_2<thres_umap2[2] )
+  circ_select<-subset(circ_select1,UMAP_1<(circ_scale*max(circ_select_raw$UMAP_1)) & UMAP_1>(circ_scale*min(circ_select_raw$UMAP_1)) & UMAP_2<(circ_scale*max(circ_select_raw$UMAP_2)) &
     UMAP_2>(circ_scale*min(circ_select_raw$UMAP_2)))
   plots<-c()
   for(i in 1:length(exp_matrix)){
@@ -277,6 +282,28 @@ make_circled_featureplot<-function(sdata,features,circ_cluster,cluster_name="RNA
   }
   pall<-wrap_plots(plots,ncol=ceiling(sqrt(length(features))))
   return(pall)
+}
+
+#4-1 make ellipse circle plot, dimplot
+make_ellipse_dimplot<-function(sdata,group.by="RNA_snn_res.0.8",alpha_value=1/10,linesize=1,circsub="all"){
+  Cluster<-sdata@meta.data[[group.by]]
+  cell_embeddings<-sdata@reductions$umap@cell.embeddings
+  circ_data<-data.frame(Cluster,cell_embeddings)
+  if(length(circsub)==1){
+    if(circsub=="all"){
+      subdata<-circ_data
+    }
+    else{
+      subdata<-subset(circ_data,Cluster==circsub)
+    }
+  }
+  else{
+    subdata<-subset(circ_data,Cluster %in% circsub)
+  }
+  p1<-DimPlot(sdata,label=T,group.by=group.by)+
+    stat_ellipse(data=subdata,aes(x=UMAP_1,y=UMAP_2,color=Cluster,fill=Cluster),level = 0.9,geom = "polygon", alpha = alpha_value,linewidth=linesize)+
+    NoLegend()
+  return(p1)
 }
 
 #5. convert to scanpy anndata
