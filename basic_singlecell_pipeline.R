@@ -41,6 +41,15 @@ features_prog<-"SOX2"
 features_position<-c("OTX2","EN1","PLP1","LMX1A","FOXA2")
 features_all<-c(features_fib,features_peri,features_vlmc,features_dural_fib,features_ara_fib,features_pial_fib,features_DA,features_DA_A9,features_DA_A10,features_Glut,features_gaba,features_Sero,features_OTP,features_Astrocyte,features_astro_A1,features_astro_A2,features_od,features_opc,features_peric,features_Nb,features_neuron,features_prog,features_position)
 
+#NC features
+f_neural_prog<-c("NES","SOX2","SOX9","RFX4")
+f_neurogenesis<-c("NEUROG2","ASCL1","HES1","HES5")
+f_neuron_prog<-c("DCX","NCAM1","SYT1","STMN2")
+f_DA_neuron<-c("TH","DDC","PBX1","PITX3")
+f_DA_neurogenesis<-c("LMX1A","FOXA2","NR4A2","OTX2")
+f_cellcycle<-c("CCNB2","AURKB","PTTG1","TOP2A")
+f_nc<-c(f_neural_prog,f_neurogenesis,f_neuron_prog,f_DA_neuron,f_DA_neurogenesis,f_cellcycle)
+
 
 #1. dimplot making, include merged and split
 dimplot_making<-function(sdata,fname="stem.data",cluster="RNA_snn_res.0.8",colorset="Pastel1",colornum=50,height_m=5,width_m=6,height_s=8,
@@ -63,13 +72,13 @@ dimplot_making<-function(sdata,fname="stem.data",cluster="RNA_snn_res.0.8",color
   else if(Legend=="Yes"){
     width_m1=width_m+2
     pdf(merge_name,height=height_m,width=width_m1)
-    print(DimPlot(sdata,label=T)+NoLegend()+scale_color_manual(values=colorRampPalette(brewer.pal(8,colorset))(colornum)))
+    print(DimPlot(sdata,label=T)+scale_color_manual(values=colorRampPalette(brewer.pal(8,colorset))(colornum)))
     dev.off()
     sample_num<-length(unique(sdata$Sample))
     colnum<-ceiling(sample_num/2)
     width_s1=colnum/2*height_s+4
     pdf(split_name,height=height_s,width=width_s1)
-    print(DimPlot(sdata,split.by="Sample",label=T,ncol=colnum)+NoLegend()+
+    print(DimPlot(sdata,split.by="Sample",label=T,ncol=colnum)+
             scale_color_manual(values=colorRampPalette(brewer.pal(8,colorset))(colornum)))
     dev.off()
   }
@@ -104,13 +113,13 @@ cal_percentage<-function(samplename,clustername,metadata){
   perdata$Sample<-factor(perdata$Sample,levels=unique(metadata$Sample))
   return(perdata)
 }
-percent_graph_make<-function(sdata,fname="stem.data",clustername="RNA_snn_res.0.8",graph_type="lollipop",scale="fixed",
+percent_graph_make<-function(sdata,fname="stem.data",samplename="Sample",clustername="RNA_snn_res.0.8",graph_type="lollipop",scale="fixed",
                              txt_size=15){
   metadata<-sdata@meta.data
   color_num<-length(unique(metadata$Sample))
-  perdata<-cal_percentage("Sample",clustername,metadata)
-  perdata$Sample<-factor(perdata$Sample,unique(metadata$Sample))
-  if(clustername=="RNA_snn_res.0.8"){
+  perdata<-cal_percentage(samplename,clustername,metadata)
+  perdata$Sample<-factor(perdata[[samplename]],unique(metadata[[samplename]]))
+  if(str_detect(clustername,"RNA_snn_res")){
     level_max<-max(as.numeric(as.character(perdata$Cluster)))
     perdata$Cluster<-factor(perdata$Cluster,levels=0:level_max)
   }
@@ -607,7 +616,7 @@ is_transcription_factor<-function(marker_file){
 }
 
 #10. calculate the expression percentage of certain genes, default threshold is 0
-cal_exp_percentage<-function(stem.data,features,thres=0){
+cal_exp_percentage<-function(stem.data,features,thres=0,Cluster_to_cal="Sample"){
   exp_data<-FetchData(stem.data,vars=features)
   colnames<-c()
   for(i in 1:length(exp_data)){
@@ -615,7 +624,8 @@ cal_exp_percentage<-function(stem.data,features,thres=0){
     colnames<-c(colnames,gname)
   }
   colnames(exp_data)<-colnames
-  samlist=unique(stem.data$Sample)
+  samlist=unique(stem.data@meta.data[[Cluster_to_cal]])
+  stem.data$Cluster_tmp<-stem.data@meta.data[[Cluster_to_cal]]
   metadata<-stem.data@meta.data
   metadata<-cbind(metadata,exp_data)
   #make the combination list of different features
@@ -630,7 +640,7 @@ cal_exp_percentage<-function(stem.data,features,thres=0){
   }
   dataout<-c()
   for(sl in samlist){
-    sub1<-subset(metadata,Sample==sl)
+    sub1<-subset(metadata,Cluster_tmp==sl)
     for(cl in combn_list){
       subsub<-sub1
       for(k in cl){
@@ -652,7 +662,7 @@ cal_exp_percentage<-function(stem.data,features,thres=0){
       dataout<-rbind(dataout,dtmp)
     }
   }
-  colnames(dataout)<-c("Sample","Gene","Percentage(%)")
+  colnames(dataout)<-c(Cluster_to_cal,"Gene","Percentage(%)")
   return(dataout)
 }
 
@@ -690,5 +700,47 @@ add_cluster_name<-function(sdata,CelltypeFileName="Celltype.csv",clustername="Cl
   return(sdata)
 }
 
-
-
+# 13. RNA velocity
+library(velocyto.R)
+## 13-1 change the barcode names of velocity result to Seurat object and filter
+change_barcode_name<-function(sdata,velodata){
+  velo_colname<-colnames(velodata[[1]])
+  velo_colist<-str_split(velo_colname,":",simplify=T)
+  velo_colname1<-velo_colist[,2]
+  velo_colname1<-gsub("x","-1",velo_colname1)
+  stem_colname<-colnames(sdata)
+  stem_colist<-str_split(stem_colname,"_",simplify=T)
+  bar_num<-stem_colist[1,2]
+  velo_colname1<-paste0(velo_colname1,"_",bar_num)
+  velo_new<-list()
+  for(i in 1:length(velodata)){
+    velo_each<-velodata[[i]]
+    colnames(velo_each)<-velo_colname1
+    velosub<-velo_each[,stem_colname]
+    velo_new<-c(velo_new,list(velosub))
+  }
+  names(velo_new)<-names(velodata)
+  return(velo_new)
+}
+ingrate_velo_to_seurat<-function(sdata,velofile_list){
+  barcode_list<-str_split(colnames(sdata),"_",simplify=T)
+  sdata$bar_tmp<-barcode_list[,2]
+  samnumlist<-unique(barcode_list[,2])
+  velo_spliced<-c()
+  velo_unspliced<-c()
+  velo_ambiguous<-c()
+  for(i in 1:length(barcode_list)){
+    fname=inputfnames[i]
+    veloname<-paste0("/data/wangrj/single_cell/all_output_data/",fname,"/velocyto/",fname,".loom")
+    velodata<-read.loom.matrices(veloname, engine = "hdf5r")
+    subdata<-subset(sdata,bar_tmp==samnumlist[i])
+    velodata_new<-change_barcode_name(subdata,velodata)
+    velo_spliced<-cbind(velo_spliced,velodata_new[[1]])
+    velo_unspliced<-cbind(velo_unspliced,velodata_new[[2]])
+    velo_ambiguous<-cbind(velo_ambiguous,velodata_new[[3]])
+  }
+  sdata[["spliced"]] <- CreateAssayObject(counts = as.matrix(velo_spliced))
+  sdata[["unspliced"]] <- CreateAssayObject(counts = as.matrix(velo_unspliced))
+  sdata[["ambiguous"]] <- CreateAssayObject(counts = as.matrix(velo_ambiguous))
+  return(sdata)
+}
