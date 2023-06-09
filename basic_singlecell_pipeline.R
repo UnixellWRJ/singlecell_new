@@ -38,7 +38,7 @@ features_Nb<-c('NEUROD1','NEUROD2','ASCL1','INSM1')
 features_neuron<-"STMN2"
 features_prog<-"SOX2"
 ##vitro
-features_position<-c("OTX2","EN1","PLP1","LMX1A","FOXA2")
+features_position<-c("OTX2","EN1","PLP1","LMX1A","FOXA2","FGF8","BARHL1","BARHL2","CRH")
 features_all<-c(features_fib,features_peri,features_vlmc,features_dural_fib,features_ara_fib,features_pial_fib,features_DA,features_DA_A9,features_DA_A10,features_Glut,features_gaba,features_Sero,features_OTP,features_Astrocyte,features_astro_A1,features_astro_A2,features_od,features_opc,features_peric,features_Nb,features_neuron,features_prog,features_position)
 
 #NC features
@@ -51,7 +51,121 @@ f_cellcycle<-c("CCNB2","AURKB","PTTG1","TOP2A")
 f_nc<-c(f_neural_prog,f_neurogenesis,f_neuron_prog,f_DA_neuron,f_DA_neurogenesis,f_cellcycle)
 
 
-#1. dimplot making, include merged and split
+# 0. merge file functions -------------------------------------------------
+#Define the lookup table
+thresholds <- c(800, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000)
+ratios <- c(0.004, 0.008, 0.016, 0.023, 0.031, 0.039, 0.054, 0.054, 0.061, 0.069, 0.076)
+lookup_table <- data.frame(threshold = thresholds, ratio = ratios)
+# Define the function
+def_ratio <- function(number) {
+  # Find the highest threshold that is less than or equal to the number
+  index <- max(which(lookup_table$threshold <= number))
+  
+  # Use the corresponding ratio from the lookup table
+  if (is.na(index)) {
+    ratio <- 0
+  } else {
+    ratio <- lookup_table$ratio[index]
+  }
+  return(ratio)
+}
+
+# filtering doublets
+rm_doublet <- function(sample,ndims=10){
+  object<-sample
+  #define the ratio number
+  cellnums<-length(colnames(object))
+  ratio<-def_ratio(cellnums)
+  sweep.res.list <- paramSweep_v3(object, PCs = 1:ndims, sct = FALSE)
+  sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+  bcmvn <- find.pK(sweep.stats)
+  mpK<-as.numeric(as.vector(bcmvn$pK[which.max(bcmvn$BCmetric)]))
+  nExp_poi <- round(ratio*nrow(object@meta.data))
+  object <- doubletFinder_v3(object, PCs = 1:ndims, pN = 0.25, pK = mpK, nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+  ob_meta<-object@meta.data
+  sample$Def_doublets<-ob_meta[,length(ob_meta)]
+  sample_sub<-subset(sample,Def_doublets=="Singlet")
+  return(sample_sub)
+}
+
+#select proper dim number according to elbow results, i.e., the results from "Stdev" function
+#choose dim where the elbow slope is relatively stable. The cutoff is set to 0.05 to ensure the 
+#reuslt is relatively stable. This number can be changed for proper reason.
+select_dim<-function(sample, avg_cutoff=0.05){
+  data_std<-Stdev(sample,reduction="pca")
+  data_tmp<-c(data_std[2:length(data_std)],data_std[length(data_std)])
+  data_diff<-data_std-data_tmp
+  num<-length(data_std)-5
+  for(i in 1:num){
+    avg<-mean(data_diff[i:(i+5)])
+    if(avg<avg_cutoff){
+      break
+    }
+  }
+  dimnum=i+3
+  return(dimnum)
+}
+
+#data filtering by outlier, including percent.mt and the upper threshold of UMI and feature
+#outlier_type:low,high,both
+is_outlier<-function(sdata,metric,nmads=5,outlier_type="high"){
+  metricnum<-sdata@meta.data[[metric]]
+  barcode<-colnames(sdata)
+  metricdata<-data.frame(barcode,metricnum)
+  thres_low=median(metricnum)-nmads*mad(metricnum)
+  thres_high=median(metricnum)+nmads*mad(metricnum)
+  if(outlier_type=="high"){
+    oldata=subset(metricdata,metricnum>thres_high)
+  }
+  else if(outlier_type=="low"){
+    oldata=subset(metricdata,metricnum<thres_low)
+  }
+  else if(outlier_type=="both"){
+    oldata=subset(metricdata,metricnum<thres_low | metricnum>thres_high)
+  }
+  outlier=oldata$barcode
+  return(outlier)
+}
+
+#data reanalysis process
+data_reanalysis<-function(stem.data){
+  DefaultAssay(stem.data)<-"RNA"
+  stem.data<-FindVariableFeatures(stem.data,nfeatures = 4000)
+  var_features<-stem.data@assays$RNA@var.features
+  exp_mat<-FetchData(stem.data,vars=var_features)
+  top_2a<-exp_mat$TOP2A
+  var_sub<-c()
+  corlist<-c()
+  ccycle_features<-c()
+  for(vf in var_features){
+    exp_ge<-exp_mat[[vf]]
+    cor_result<-cor(top_2a,exp_ge,method="pearson")
+    corlist<-c(corlist,cor_result)
+    if(cor_result<=0.15){
+      var_sub<-c(var_sub,vf)
+    }
+    else{
+      ccycle_features<-c(ccycle_features,vf)
+    }
+  }
+  stem.data@assays$RNA@var.features<-var_sub
+  s.genes <- cc.genes.updated.2019$s.genes
+  g2m.genes <- cc.genes.updated.2019$g2m.genes
+  stem.data <- CellCycleScoring(object = stem.data, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+  stem.data$CC.Difference <- stem.data$S.Score - stem.data$G2M.Score
+  stem.data<-ScaleData(stem.data)
+  stem.data<-RunPCA(stem.data,npcs=100)
+  ndim<-select_dim(stem.data)
+  print(ndim)
+  stem.data<-FindNeighbors(stem.data, reduction = "pca", dims = 1:ndim, nn.eps = 0.5)
+  stem.data <- FindClusters(stem.data, resolution = 0.8, n.start = 10)
+  stem.data<-RunUMAP(stem.data,reduction="pca",dims=1:ndim)
+  stem.data<-RunTSNE(stem.data,reduction="pca",dims=1:ndim)
+  return(stem.data)
+}
+
+
+# 1. dimplot making, include merged and split -----------------------------
 dimplot_making<-function(sdata,fname="stem.data",cluster="RNA_snn_res.0.8",colorset="Pastel1",colornum=50,height_m=5,width_m=6,height_s=8,
                          Legend="No"){
   merge_name<-paste0("dimplot_",fname,"_merged.pdf")
@@ -84,7 +198,8 @@ dimplot_making<-function(sdata,fname="stem.data",cluster="RNA_snn_res.0.8",color
   }
 }
 
-#2. percentage calculation and graph making
+
+# 2. percentage calculation and graph making ------------------------------
 #three types of graph to choose: lollipop, bar, point-line
 cal_percentage<-function(samplename,clustername,metadata){
   samlist<-unique(metadata[[samplename]])
@@ -156,7 +271,8 @@ percent_graph_make<-function(sdata,fname="stem.data",samplename="Sample",cluster
   dev.off()
 }
 
-#3. heatmap making
+
+# 3. heatmap making -------------------------------------------------------
 #3-1 heatmap making by marker_file
 make_dot_heatmap<-function(sdata,marker_file,fname="stem.data",ntop=5,mcenter=T,mscale=T,
                            color_l="grey20",color_m="white",color_h="red"){
@@ -185,6 +301,7 @@ make_dot_heatmap<-function(sdata,marker_file,fname="stem.data",ntop=5,mcenter=T,
   clist<-unique(plot_data$Cluster)
   for(cl in clist){
     markersub<-subset(marker_file,cluster==cl)
+    rownames(markersub)<-markersub$gene
     gesub<-unique(markersub$gene)
     for(gl in genelist){
       if(gl %in% gesub){
@@ -258,7 +375,8 @@ make_dot_heatmap_features<-function(sdata,features,fname="stem.data",mcenter=T,m
   dev.off()
 }
 
-#4. make featureplot with circle in specific genes
+
+# 4. make featureplot with circle in specific genes -----------------------
 library(ggplot2)
 library(ggraph)
 library(ggalt)
@@ -315,7 +433,8 @@ make_ellipse_dimplot<-function(sdata,group.by="RNA_snn_res.0.8",alpha_value=1/10
   return(p1)
 }
 
-#5. convert to scanpy anndata
+
+# 5. convert to scanpy anndata --------------------------------------------
 convert_to_scanpy<-function(sdata,fname){
   dyn.load('/home/software/hdf5-1.14.0/hdf5/lib/libhdf5_hl.so.310')
   library(SeuratDisk)
@@ -323,7 +442,8 @@ convert_to_scanpy<-function(sdata,fname){
   Convert(paste0(fname,".h5Seurat"), dest = "h5ad")
 }
 
-#6. enrichment analysis by gsea cell type database
+
+# 6. enrichment analysis by gsea cell type database -----------------------
 library(clusterProfiler)
 library(dplyr)
 library(msigdbr)
@@ -558,7 +678,8 @@ gsva_analysis_cell_type<-function(sdata,marker_file,cluster_name="RNA_snn_res.0.
   return(GSVA_result)
 }
 
-#7. cell annotation by SingleR
+
+# 7. cell annotation by SingleR -------------------------------------------
 library(SingleR)
 singler_anno<-function(reffile="/data/wangrj/single_cell/ref_singlecell_data/embryo_named_230513.qs",testdata,method="cluster"){
   refdata=qread(reffile)
@@ -585,7 +706,8 @@ singler_anno<-function(reffile="/data/wangrj/single_cell/ref_singlecell_data/emb
 #plotDeltaDistribution(annodata, ncol = 3)
 
 
-#8. cell type annotation by Seurat
+
+# 8. cell type annotation by Seurat ---------------------------------------
 seurat_celltype<-function(reffile="/data/wangrj/single_cell/ref_singlecell_data/embryo_named_230513.qs",testdata,defaultassay="RNA"){
   refdata=qread(reffile)
   DefaultAssay(refdata)<-defaultassay
@@ -598,7 +720,8 @@ seurat_celltype<-function(reffile="/data/wangrj/single_cell/ref_singlecell_data/
   return(testdata)
 }
 
-#9. subset marker files for plasma membrane or transcription factor genes
+
+# 9. subset marker files for plasma membrane or transcription fact --------
 #9-1 plasma membrane
 is_plasma_membrane<-function(marker_file){
   pm_list<-read.delim("/data/wangrj/single_cell/gmt_files/GO_plasma_membrane_select_genes.txt",header=F)
@@ -615,7 +738,8 @@ is_transcription_factor<-function(marker_file){
   return(marker_sub)
 }
 
-#10. calculate the expression percentage of certain genes, default threshold is 0
+
+# 10. calculate the expression percentage of certain genes, defaul --------
 cal_exp_percentage<-function(stem.data,features,thres=0,Cluster_to_cal="Sample"){
   exp_data<-FetchData(stem.data,vars=features)
   colnames<-c()
@@ -666,7 +790,8 @@ cal_exp_percentage<-function(stem.data,features,thres=0,Cluster_to_cal="Sample")
   return(dataout)
 }
 
-#11. make blend featureplot by dimplot function
+
+# 11. make blend featureplot by dimplot function --------------------------
 make_blend_featureplot<-function(sdata,features){
   exp_matrix<-FetchData(sdata,vars=features)
   exp_type<-c()
@@ -687,7 +812,8 @@ make_blend_featureplot<-function(sdata,features){
   return(p1)
 }
 
-#12. Add cluster name to the dataset by Seurat function RenameIdents by loading cell type csv file
+
+# 12. Add cluster name to the dataset by Seurat function RenameIde --------
 #The file has two columns:Cluster,CellType
 add_cluster_name<-function(sdata,CelltypeFileName="Celltype.csv",clustername="Cluster_name",cluster_to_annotate="RNA_snn_res.0.8"){
   ctdata<-read.csv(CelltypeFileName,header=T)
@@ -700,7 +826,8 @@ add_cluster_name<-function(sdata,CelltypeFileName="Celltype.csv",clustername="Cl
   return(sdata)
 }
 
-# 13. RNA velocity
+
+# 13. RNA velocity --------------------------------------------------------
 library(velocyto.R)
 ## 13-1 change the barcode names of velocity result to Seurat object and filter
 change_barcode_name<-function(sdata,velodata){
