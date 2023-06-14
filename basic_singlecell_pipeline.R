@@ -5,7 +5,9 @@ library(ComplexHeatmap)
 library(dplyr)
 library(reshape2)
 library(patchwork)
-
+library(ggfittext)
+library(ggpubr)
+library(stringr)
 #colorlist
 #18 colors for refdata
 colorset_18<-c("grey80","grey80","grey80","grey80","grey80","#FF00CC","#FF0033","#66CCFF","#66FF00","#66CCCC","grey80","grey80",
@@ -200,7 +202,8 @@ dimplot_making<-function(sdata,fname="stem.data",cluster="RNA_snn_res.0.8",color
 
 
 # 2. percentage calculation and graph making ------------------------------
-#three types of graph to choose: lollipop, bar, point-line
+#three types of graph to choose: lollipop, bar-dodge,bar-stack, point-line
+library(ggfittext)
 cal_percentage<-function(samplename,clustername,metadata){
   samlist<-unique(metadata[[samplename]])
   clist<-unique(metadata[[clustername]])
@@ -252,11 +255,18 @@ percent_graph_make<-function(sdata,fname="stem.data",samplename="Sample",cluster
       theme_classic()+theme(text=element_text(size=txt_size),axis.text.x = element_text(angle=60,hjust=1))+
       facet_wrap(~Cluster,ncol=num_w,scale=scale)
   }
-  else if(graph_type=="bar"){
+  else if(graph_type=="bar-dodge"){
     p1<-ggplot(perdata,aes(x=Sample,y=Percentage,fill=Sample))+geom_bar(stat="identity",position="dodge",color="black")+
+      #geom_fit_text(reflow = TRUE)+
       scale_fill_manual(values=colorRampPalette(brewer.pal(8,"Set2"))(color_num))+
       theme_classic()+theme(text=element_text(size=txt_size),axis.text.x = element_text(angle=90,hjust=1))+
       facet_wrap(~Cluster,ncol=num_w,scale=scale)
+  }
+  else if(graph_type=="bar-stack"){
+    p1<-ggplot(perdata,aes(x=Sample,y=Percentage,fill=Cluster,label=Percentage))+geom_bar(stat="identity",position="stack",color="black")+
+      geom_fit_text(reflow = TRUE)+
+      #scale_fill_manual(values=colorRampPalette(brewer.pal(8,"Set2"))(color_num))+
+      theme_classic()+theme(text=element_text(size=txt_size),axis.text.x = element_text(angle=90,hjust=1))
   }
   else{
     p1<-ggplot(perdata,aes(x=Sample,y=Percentage,group=Cluster,color=Sample))+
@@ -782,11 +792,13 @@ cal_exp_percentage<-function(stem.data,features,thres=0,Cluster_to_cal="Sample")
       per_each<-num_each/length(sub1[,1])*100
       fsub<-features[cl]
       fname<-paste(fsub,collapse="&")
-      dtmp<-data.frame(sl,fname,per_each)
+      num_pos<-num_each
+      num_all<-length(sub1[,1])
+      dtmp<-data.frame(sl,fname,per_each,num_pos,num_all)
       dataout<-rbind(dataout,dtmp)
     }
   }
-  colnames(dataout)<-c(Cluster_to_cal,"Gene","Percentage(%)")
+  colnames(dataout)<-c(Cluster_to_cal,"Gene","Percentage(%)","Num_pos","Num_all")
   return(dataout)
 }
 
