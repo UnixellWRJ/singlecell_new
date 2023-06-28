@@ -8,11 +8,16 @@ library(patchwork)
 library(ggfittext)
 library(ggpubr)
 library(stringr)
+library(monocle)
 #colorlist
 #18 colors for refdata
+source("/data/wangrj/git_related/self_git/singlecell_new/function_sisbar.R")
 colorset_18<-c("grey80","grey80","grey80","grey80","grey80","#FF00CC","#FF0033","#66CCFF","#66FF00","#66CCCC","grey80","grey80",
                        "grey80","grey80","grey80","grey80","grey80","grey80")
-
+cols01<-c("#93cc82","#4d97cd","#f6f5ee","#ea9c9d","#c74546","#88c4e8")
+cols02<-c("#db6968","#4d97cd","#99cbeb","#459943","#fdc58f","#e8c559","#a3d393","#f8984e")
+cols03<-c("#af2934","#ffe327","#2f4e87","#b0b9b8","#f0eedf","#aed4e9","#f4a69a","#3ba889","#4593c3","#f18e0c","#262a35","#c5942e","#a2a7ab")
+cols04<-c("#88c4e8","#db6968","#982b2b","#0074b3","#e5ce81","#f47720","#459943","#bdc3d2")
 #celltype annotation features
 ##vivo
 features_fib<-c("COL1A1","COL1A2","VIM","FN1","PDGFRB","PDGFRA","LAMA1","ANPEP")
@@ -21,6 +26,7 @@ features_vlmc<-c("PDGFRB", "ACTA2", "ANPEP", "CSPG4", "MCAM", "DES")
 features_dural_fib<-c("FXYD5", "FOXP1", "SIX1")
 features_ara_fib<-c("CRABP2", "ALDH1A2", "SLC6A13")
 features_pial_fib<-c("S100A6","NGFR")
+features_fib_all<-unique(c(features_fib,features_peri,features_vlmc,features_dural_fib,features_pial_fib))
 features_DA<-"TH"
 features_DA_A9<-c("ALDH1A1","KCNJ6","NR4A2")
 features_DA_A10<-"CALB1"
@@ -52,6 +58,15 @@ f_DA_neurogenesis<-c("LMX1A","FOXA2","NR4A2","OTX2")
 f_cellcycle<-c("CCNB2","AURKB","PTTG1","TOP2A")
 f_nc<-c(f_neural_prog,f_neurogenesis,f_neuron_prog,f_DA_neuron,f_DA_neurogenesis,f_cellcycle)
 
+#xpb features
+xpb_features_all<-c("SHH","FOXA2","OTX2","LMX1A","EN1","CLSTN2","ADAMTS9","TTR","CD83","PTPRO","WNT5A","PAX5","PAX8","CNPY1","FAM181B",
+                    "CMTM8","SULF1","MAF","SP5","SIM2","ERBB4","WNT7A","NTRK2","SOX3","SHISA3","NKX2-2","OTX1","FILIP1","NKX2-8","FGF8",
+                    "HTR1D","EMX1","PITX2","SLC17A6","CRH","MSX1","RSPO2","HOXA2","HOTAIRM1","PAX6","NHLH2","NR4A2","TH","PITX3","ISL1",
+                    "PHOX2A","PHOX2B","FGF17","PAX2","NEUROD4","NEUROG2","PHLDA1","NHLH1","NEUROG1","RASD1","SHOX2","VSX1","VSX2",
+                    "GATA3","GATA2","CHGA","FEV","SLC17A8","LHX1","GAD2","SLC32A1")
+
+#development marker
+dev_features<-c("DKK1","NOG","LEFTY1","CER1")
 
 # 0. merge file functions -------------------------------------------------
 #Define the lookup table
@@ -168,8 +183,9 @@ data_reanalysis<-function(stem.data){
 
 
 # 1. dimplot making, include merged and split -----------------------------
+#1-1 raw dimplot
 dimplot_making<-function(sdata,fname="stem.data",cluster="RNA_snn_res.0.8",colorset="Pastel1",colornum=50,height_m=5,width_m=6,height_s=8,
-                         Legend="No"){
+                         Legend="No",Label=T){
   merge_name<-paste0("dimplot_",fname,"_merged.pdf")
   split_name<-paste0("dimplot_",fname,"_split.pdf")
   Idents(sdata)<-sdata[[cluster]]
@@ -181,7 +197,7 @@ dimplot_making<-function(sdata,fname="stem.data",cluster="RNA_snn_res.0.8",color
     colnum<-ceiling(sample_num/2)
     width_s=colnum/2*height_s+2
     pdf(split_name,height=height_s,width=width_s)
-    print(DimPlot(sdata,split.by="Sample",label=T,ncol=colnum)+NoLegend()+
+    print(DimPlot(sdata,split.by="Sample",label=Label,ncol=colnum)+NoLegend()+
             scale_color_manual(values=colorRampPalette(brewer.pal(8,colorset))(colornum)))
     dev.off()
   }
@@ -194,10 +210,43 @@ dimplot_making<-function(sdata,fname="stem.data",cluster="RNA_snn_res.0.8",color
     colnum<-ceiling(sample_num/2)
     width_s1=colnum/2*height_s+4
     pdf(split_name,height=height_s,width=width_s1)
-    print(DimPlot(sdata,split.by="Sample",label=T,ncol=colnum)+
+    print(DimPlot(sdata,split.by="Sample",label=Label,ncol=colnum)+
             scale_color_manual(values=colorRampPalette(brewer.pal(8,colorset))(colornum)))
     dev.off()
   }
+}
+
+#1-2 self-made dimplot,including data construction and plot making; return the plot data p
+#the data is like the xpb paper, remove the axis and axis text
+self_made_dimplot<-function(sdata,clustername,reduction="umap",label=T,colorset=cols04){
+  #sdata$Cluster<-sdata@meta.data[[clustername]]
+  Cluster<-sdata@meta.data[[clustername]]
+  cell_embeddings_umap<-sdata@reductions$umap@cell.embeddings
+  cell_embeddings_tsne<-sdata@reductions$tsne@cell.embeddings
+  if(reduction=="umap"){
+    cell_embeddings<-cell_embeddings_umap
+  }
+  else{
+    cell_embeddings<-cell_embeddings_tsne
+  }
+  plot_data<-data.frame(Cluster,cell_embeddings)
+  colnames(plot_data)<-c("Cluster","UMAP_1","UMAP_2")
+  colornum=length(unique(Cluster))
+  #by ggplot
+  p1<-ggplot(plot_data, aes(UMAP_1, UMAP_2, color=Cluster)) +
+    geom_point(size=0.5) + 
+    scale_color_manual(values=colorRampPalette(colorset)(colornum))+
+    theme_classic()+
+    labs(color="")+
+    theme(axis.text=element_blank(),axis.title=element_blank(),axis.ticks=element_blank(),axis.line=element_blank(),text=element_text(size=15))+
+    guides(color=guide_legend(override.aes = list(alpha=1,size=4)))
+  if(label){
+    p2<-LabelClusters(p1,id="Cluster",color="black",fontface="bold")
+  }
+  else{
+    p2<-p1
+  }
+  return(p2)
 }
 
 
@@ -234,7 +283,7 @@ cal_percentage<-function(samplename,clustername,metadata){
 percent_graph_make<-function(sdata,fname="stem.data",samplename="Sample",clustername="RNA_snn_res.0.8",graph_type="lollipop",scale="fixed",
                              txt_size=15){
   metadata<-sdata@meta.data
-  color_num<-length(unique(metadata$Sample))
+  color_num<-length(unique(metadata[[samplename]]))
   perdata<-cal_percentage(samplename,clustername,metadata)
   perdata$Sample<-factor(perdata[[samplename]],unique(metadata[[samplename]]))
   if(str_detect(clustername,"RNA_snn_res")){
@@ -341,11 +390,13 @@ make_dot_heatmap<-function(sdata,marker_file,fname="stem.data",ntop=5,mcenter=T,
   dev.off()
 }
 #3-2 heatmap making of selected genes
-make_dot_heatmap_features<-function(sdata,features,fname="stem.data",mcenter=T,mscale=T,
+make_dot_heatmap_features<-function(sdata,features,fname="stem.data",clustername="RNA_snn_res.0.8",mcenter=T,mscale=T,
                                     color_l="grey20",color_m="white",color_h="red"){
+  Idents(sdata)<-sdata[[clustername]]
   avg_list<-AverageExpression(sdata,assays="RNA",features=features)
   avg<-avg_list[["RNA"]]
   avg_scale<-data.frame(t(scale(t(avg),center=mcenter,scale=mscale)))
+  colnames(avg_scale)<-colnames(avg)
   avg_scale$Gene<-rownames(avg_scale)
   #Colname<-colnames(avg)
   #Rowname<-rownames(avg)
@@ -355,7 +406,7 @@ make_dot_heatmap_features<-function(sdata,features,fname="stem.data",mcenter=T,m
   #avg_scale<-dcast(avg_melt,Var1~Var2)
   #colnames(avg_scale)[1]<-"Gene"
   plot_data<-melt(avg_scale,id.vars="Gene",value.name="Avg_exp",variable.name="Cluster")
-  plot_data$Cluster<-gsub("X","",plot_data$Cluster)
+  #plot_data$Cluster<-gsub("X","",plot_data$Cluster)
   #make pct data
   #calculate fold change of selected genes
   features_sub<-unique(plot_data$Gene)
@@ -600,13 +651,13 @@ gsea_analysis<-function(markersub,title,catgory_num=10,pval_used="padj",color_l=
     fgsub<-subset(fgdata,pval<0.05 & NES>0)
   }
   if(length(fgsub$NES)>catgory_num){
-    fg_final<-fgsub[1:10,]
+    fg_final<-fgsub[1:catgory_num,]
   }
   else if(length(fgsub$pathway)>0){
     fg_final<-fgsub
   }
   else if(length(fgsub$pathway)==0){
-    fg_final<-fgdata[1:10,]
+    fg_final<-fgdata[1:catgory_num,]
     color_l<-"grey100"
     color_h<-"grey80"
   }
@@ -638,13 +689,14 @@ gsea_analysis<-function(markersub,title,catgory_num=10,pval_used="padj",color_l=
     Gene<-c(Gene,ge_merge)
   }
   fgdata$Gene<-Gene
-  gsea_new<-select(fgdata,-leadingEdge)
+  #gsea_new<-select(data.table(fgdata),-leadingEdge)
+  gsea_new<-fgdata[,!"leadingEdge"]
   result<-list(p2,p1,gsea_new)
   #design<-"AAAAAAB"
   #wrap_plots(A=p2,B=p1,design=design)
   return(result)
 }
-make_gsea_celltype_analysis<-function(marker_file,fname,genenum="all",height_plot=5,width_plot=20,
+make_gsea_celltype_analysis<-function(marker_file,fname,genenum="all",pval_used="padj",catgory_num=10,height_plot=5,width_plot=20,
                                       gmt_file="/data/wangrj/single_cell/gmt_files/c8.all.v2023.1.Hs.symbols.gmt"){
   gsea_result<-c()
   markers_select<-subset(marker_file,p_val_adj<0.05 & avg_log2FC>0)
@@ -657,13 +709,13 @@ make_gsea_celltype_analysis<-function(marker_file,fname,genenum="all",height_plo
   else{
     topn_markers<-markers_select
   }
-  clist<-unique(marker_file$cluster)
+  clist<-unique(topn_markers$cluster)
   pdfname<-paste0("Celltype_GSEA_analysis_msigDB_",fname,"_plots.pdf")
   pdf(pdfname,height=height_plot,width=width_plot)
   for(cl in clist){
     markersub<-subset(topn_markers,cluster==cl)
     titlename=paste0("Cluster ",cl," GSEA analysis")
-    plot_list<-gsea_analysis(markersub,titlename,gmt_file=gmt_file)
+    plot_list<-gsea_analysis(markersub,titlename,gmt_file=gmt_file,pval_used = pval_used,catgory_num=catgory_num)
     result_sub<-plot_list[[3]]
     result_sub$Cluster<-cl
     gsea_result<-rbind(gsea_result,result_sub)
@@ -749,7 +801,7 @@ is_transcription_factor<-function(marker_file){
 }
 
 
-# 10. calculate the expression percentage of certain genes, defaul --------
+# 10. calculate the expression percentage of certain genes, default --------
 cal_exp_percentage<-function(stem.data,features,thres=0,Cluster_to_cal="Sample"){
   exp_data<-FetchData(stem.data,vars=features)
   colnames<-c()
@@ -831,7 +883,7 @@ add_cluster_name<-function(sdata,CelltypeFileName="Celltype.csv",clustername="Cl
   ctdata<-read.csv(CelltypeFileName,header=T)
   cluster<-ctdata$Cluster
   celltype<-ctdata$CellType
-  Idents(sdata)<-sdata[[cluster_to_annotate]]
+  Idents(sdata)<-sdata@meta.data[[cluster_to_annotate]]
   names(celltype)<-cluster
   sdata<-RenameIdents(sdata,celltype)
   sdata[[clustername]]<-Idents(sdata)
@@ -883,3 +935,24 @@ ingrate_velo_to_seurat<-function(sdata,velofile_list){
   sdata[["ambiguous"]] <- CreateAssayObject(counts = as.matrix(velo_ambiguous))
   return(sdata)
 }
+
+
+# 14. make dimplot with different alpha -----------------------------------
+make_dimplot_with_alpha<-function(sdata,clustername="Celltype",samplename="Sample",emph_cluster="P_mesenFP",point_size=0.7,
+                                  graph_type="merged",colnum=2,alpha_normal=0.1){
+  Cluster<-sdata@meta.data[[clustername]]
+  Sample<-sdata@meta.data[[samplename]]
+  cell_embeddings<-sdata@reductions$umap@cell.embeddings
+  plot_data<-data.frame(Cluster,Sample,cell_embeddings)
+  p1<-ggplot(plot_data, aes(UMAP_1, UMAP_2, color=Cluster,alpha=Cluster)) +
+    geom_point(size=point_size) + scale_alpha_manual(values=c(1,rep(alpha_normal,4)))+
+    #scale_color_manual(values=colors)+
+    theme_classic()+theme(text=element_text(size=15))+
+    guides(color=guide_legend(override.aes = list(alpha=1,size=2)))
+  if(graph_type=="split"){
+    p1<-p1+facet_wrap(~Sample,ncol=colnum)+theme(strip.background = element_rect(color="white"),
+                                                 strip.text=element_text(size=16,face="bold"))
+  }
+  return(p1)
+}
+
